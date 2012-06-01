@@ -1,7 +1,7 @@
 import logging
 from sys import argv, exit
 from stat import S_IFDIR, S_IFREG
-from errno import ENOENT, ENOSYS
+from errno import *
 from os import getuid
 import time
 from datetime import datetime
@@ -51,7 +51,11 @@ class AzureFS(LoggingMixIn, Operations):
         if path.count('/') > 1: #file
             return path[:path.rfind('/')], path[path.rfind('/')+1:]
         else: #dir
-            return path[:path[1:].rfind('/')], None
+            pos = path.rfind('/',1)
+            if pos == -1:
+                return path, None
+            else:
+                return path[:pos], None
 
     def _get_container(self, path):
         base_container = path[1:] #/abc/def/g --> abc
@@ -62,12 +66,9 @@ class AzureFS(LoggingMixIn, Operations):
     def _list_container_blobs(self, path):
         d,f = self._parse_path(path)
         if d in self.files:
-            log.debug("LISTING %s, found" % d)
             return self.files[d]
 
         c = self._get_container(path)
-        log.info("LISTING %s, CONTAINER %s, PATH %s" % (d,c, path))
-        
         blobs = self.blobs.list_blobs(c)
 
         l = dict()
@@ -81,12 +82,33 @@ class AzureFS(LoggingMixIn, Operations):
 
     # FUSE
     def mkdir(self, path, mode):
-        log.info('Create directory %s' % path)
-        d = dict(st_mode = (S_IFDIR | mode), st_nlink = 2, st_size = 0)
-                 #st_ctime = time(), st_mtime = time(), st_atime = time())
-        self.dirs[path] = d
-        #TODO refresh containers needed?
-        #TODO PUT container
+        d,f = self._parse_path(path)
+        if path.count('/') <= 1: # create on root
+            name = path[1:]
+
+            if not 3 <= len(name) <= 63:
+                log.error("Container names can be 3 through 63 chars long.")
+                raise FuseOSError(ENAMETOOLONG)
+            if name != name.lower():
+                log.error("Container names cannot contain uppercase characters.")
+                raise FuseOSError(EACCES)
+            if name.count('--') > 0:
+                log.error('Container names cannot contain consecutive dashes (-).')
+                raise FuseOSError(EACCES)
+            #TODO handle all "-"s must be preceded by letter or numbers
+            #TODO starts with only letter or number, can contain letter, nr, dash
+
+            resp = self.blobs.create_container(name)
+            
+            if 200 <= resp < 300:
+                self._refresh_dirs()
+                log.info("CONTAINER %s CREATED" % name)
+            elif resp == 409:
+                log.error("REST ERROR HTTP %d" % resp)
+                raise FuseOSError(EEXIST)
+            else:
+                raise FuseOSError(EACCES)
+                log.error("REST ERROR HTTP %d" % resp)
 
     def getattr(self, path, fh=None):
         d,f = self._parse_path(path)
@@ -114,6 +136,7 @@ class AzureFS(LoggingMixIn, Operations):
 
     def chown(self, path, uid, gid): pass
     def chmod(self, path, mode): pass
+
 
 if __name__ == '__main__':
     if len(argv) < 4:
