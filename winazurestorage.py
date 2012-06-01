@@ -383,8 +383,9 @@ class BlobStorage(Storage):
             for blob in blobs:
                 blob_name = blob.getElementsByTagName("Name")[0].firstChild.data
                 etag = blob.getElementsByTagName("Etag")[0].firstChild.data
+                size = long(blob.getElementsByTagName("Content-Length")[0].firstChild.data)
                 last_modified = time.strptime(blob.getElementsByTagName("Last-Modified")[0].firstChild.data, TIME_FORMAT)
-                yield (blob_name, etag, last_modified)
+                yield (blob_name, etag, last_modified, size)
             try: marker = dom.getElementsByTagName("NextMarker")[0].firstChild.data
             except: marker = None
             if marker is None: break
