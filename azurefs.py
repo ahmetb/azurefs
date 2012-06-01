@@ -43,6 +43,7 @@ class AzureFS(LoggingMixIn, Operations):
         self.dirs = self._fetch_containers()
         max_date = sorted([self.dirs[c]['st_mtime'] for c in self.dirs])[-1]
 
+        # add root directory
         self.dirs['/'] = dict(st_mode = (S_IFDIR | 0755), st_uid = getuid(),
                                  st_mtime = max_date, st_size=0 , st_nlink=2)
         return self.dirs
@@ -82,7 +83,6 @@ class AzureFS(LoggingMixIn, Operations):
 
     # FUSE
     def mkdir(self, path, mode):
-        d,f = self._parse_path(path)
         if path.count('/') <= 1: # create on root
             name = path[1:]
 
@@ -109,6 +109,23 @@ class AzureFS(LoggingMixIn, Operations):
             else:
                 raise FuseOSError(EACCES)
                 log.error("REST ERROR HTTP %d" % resp)
+        else:
+            raise FuseOSError(ENOENT) #TODO support 2nd+ level mkdirs
+
+    def rmdir(self, path):
+        if path.count('/') < 2:
+            c_name = path[1:]
+            resp = self.blobs.delete_container(c_name)
+
+            if 200 <= resp < 300:
+                self._refresh_dirs() # OK, reconstuct 
+            else:
+                if resp == 404:
+                    log.info("Container %s not found." % c_name)
+                    raise FuseOSError(ENOENT)
+                raise FuseOSError(EACCES)
+        else:
+            raise FuseOSError(ENOSYS)  #TODO support 2nd+ level mkdirs
 
     def getattr(self, path, fh=None):
         d,f = self._parse_path(path)
