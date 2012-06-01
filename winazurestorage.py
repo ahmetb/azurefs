@@ -344,7 +344,11 @@ class BlobStorage(Storage):
     def delete_blob(self, container_name, blob_name):
         req = RequestWithMethod("DELETE", "%s/%s/%s" % (self.get_base_url(), container_name, blob_name))
         self._credentials.sign_request(req)
-        urlopen(req)
+        try:
+            response = urlopen(req)
+            return response.code
+        except URLError, e:
+            return e.code
 
     def get_blob(self, container_name, blob_name):
         req = Request("%s/%s/%s" % (self.get_base_url(), container_name, blob_name))
