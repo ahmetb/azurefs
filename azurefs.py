@@ -24,7 +24,7 @@ class AzureFS(LoggingMixIn, Operations):
     dirs = {} 
     files = {} #key: dirname
 
-    fds = {} # <fd, (path, bytes)>
+    fds = {} # <fd, (path, bytes, dirty)>
     fd = 0
 
     def __init__(self, account, key):
@@ -159,8 +159,9 @@ class AzureFS(LoggingMixIn, Operations):
     def create(self, path, mode):
         if path.count('/') == 2:
             d,f = self._parse_path(path)
-            self.files[d][f] = dict(st_mode = (S_IFREG | mode), st_size=0, st_uid = getuid(),
-                                    st_mtime = time.time(), st_nlink=1)
+            self.files[d][f] = dict(st_mode = (S_IFREG | mode), st_size=0, 
+                                    st_uid = getuid(), st_mtime = time.time(),
+                                    st_nlink=1)
             
             return self.open(path) # reusing handler provider
 
@@ -169,7 +170,7 @@ class AzureFS(LoggingMixIn, Operations):
     
     def open(self, path, flags=0):
         self.fd += 1
-        self.fds[self.fd] = (path, "")
+        self.fds[self.fd] = (path, "", True)
         return self.fd
 
     def flush(self, path, fh=None): #TODO
@@ -181,8 +182,12 @@ class AzureFS(LoggingMixIn, Operations):
                 raise FuseOSError(EIO)
             path = self.fds[fh][0]
             data = self.fds[fh][1]
+            dirty = self.fds[fh][2]
 
-            if data is None: data = ""
+            if not dirty:
+                return 0 # avoid redundant write
+
+            if data is None: data = ''
 
             d,f = self._parse_path(path)
             c_name = self._get_container(path)
@@ -190,6 +195,7 @@ class AzureFS(LoggingMixIn, Operations):
 
             if 200 <= resp < 300:
                 self._invalidate_dir_cache(path)
+                self.fds[fh] = (path, data, False) # mark as not dirty
                 return 0
             else:
                 raise FuseOSError(EAGAIN)
@@ -207,12 +213,12 @@ class AzureFS(LoggingMixIn, Operations):
         else:
             d = self.fds[fh][1] 
             if d is None: d = ""
-            self.fds[fh] = (self.fds[fh][0], d[:offset] + data)
+            self.fds[fh] = (self.fds[fh][0], d[:offset] + data, True)
             return len(data)
 
     def unlink(self, path):
         c_name = self._get_container(path)
-        d, f= self._parse_path(path)
+        d,f = self._parse_path(path)
 
         resp = self.blobs.delete_blob(c_name, f)
         log.info("UNLINK REST RESPONSE %d" % resp)
@@ -238,8 +244,27 @@ class AzureFS(LoggingMixIn, Operations):
             blobs = self._list_container_blobs(path)
             return ['.', '..'] + blobs.keys()
 
-    def chown(self, path, uid, gid): pass
-    def chmod(self, path, mode): pass
+    def read(self, path, size, offset, fh):
+        if not fh or fh not in self.fds:
+            raise FuseOSError(ENOENT)
+        c_name = self._get_container(path)
+        d, f= self._parse_path(path)
+        
+        try:
+            data = self.blobs.get_blob(c_name, f)
+            self.fds[fh] = (self.fds[fh][0], data, False)
+            return data[offset:offset+size]
+        except URLError, e:
+            if e.code == 404: raise FuseOSError(ENOENT)
+            elif e.code == 403: raise FUSEOSError(EPERM)
+            else: 
+                log.error("Read blob failed HTTP %d" % e.code)
+                raise FuseOSError(EAGAIN)
+
+
+        data = self.fds[fh][1]
+        if data is None: data = ""
+        return data[offset:offset + size]
 
     def destroy(self): #TODO teardown 
         pass
