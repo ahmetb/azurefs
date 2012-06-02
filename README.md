@@ -12,10 +12,10 @@ considered for production use.
 
 * Single-level file hierarchy (/container/file)
 * Untested multithreading support
-* Files larger than 64 MB not supported (requires page blobs)
 * Untested Mac OS X support
-
-
+* Untested reads and writes with offsets
+* Files larger than 64 MB not supported (requires page blobs)
+* No support for files in root level ($root container)
 
 ### Licensing
 AzureFS, copyright 2012 Ahmet Alp Balkan. Licensed under Apache License
@@ -32,5 +32,5 @@ https://github.com/terencehonles/fusepy
 
 
 ### Authors
-Ahmet Alp Balkan <ahmetalpbalkan at gmail.com>
+Ahmet Alp Balkan 'ahmetalpbalkan at gmail.com'
 

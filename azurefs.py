@@ -55,11 +55,10 @@ class AzureFS(LoggingMixIn, Operations):
 
     def _refresh_dirs(self):
         self.dirs = self._fetch_containers()
-        max_date = sorted([self.dirs[c]['st_mtime'] for c in self.dirs])[-1]
 
         # add root directory
         self.dirs['/'] = dict(st_mode = (S_IFDIR | 0755), st_uid = getuid(),
-                                 st_mtime = max_date, st_size=0 , st_nlink=2)
+                                 st_mtime = time.time(), st_size=0 , st_nlink=2)
         return self.dirs
     
     def _parse_path(self, path): # returns </dir, file(=None)>
@@ -204,13 +203,18 @@ class AzureFS(LoggingMixIn, Operations):
 
             d,f = self._parse_path(path)
             c_name = self._get_container(path)
-            resp = self.blobs.put_blob(c_name, f, data)
+
+            log.info("FLUSH: %s" % data) 
+
+            print data, tmp
+            resp = self.blobs.put_blob(c_name, f, tmp)
 
             if 200 <= resp < 300:
                 self._invalidate_dir_cache(path)
                 self.fds[fh] = (path, data, False) # mark as not dirty
                 return 0
             else:
+                log.error("Flush error HTTP %d" % resp)
                 raise FuseOSError(EAGAIN)
 
     def release(self, path, fh=None):
@@ -227,6 +231,7 @@ class AzureFS(LoggingMixIn, Operations):
             d = self.fds[fh][1] 
             if d is None: d = ""
             self.fds[fh] = (self.fds[fh][0], d[:offset] + data, True)
+            log.info("WRITTEN %s" % data) 
             return len(data)
 
     def unlink(self, path):
@@ -313,6 +318,9 @@ class AzureFS(LoggingMixIn, Operations):
 
     def getxattr(self, path, name, position=0):
         return ''
+
+    def chmod(self, path, mode): pass
+    def chown(self, path, uid, gid): pass
 
 
 if __name__ == '__main__':
