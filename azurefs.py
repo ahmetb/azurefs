@@ -1,3 +1,11 @@
+#!/usr/bin/env python
+# encoding: utf-8
+"""
+A FUSE wrapper for locally mounting Azure blob storage
+
+Ahmet Alp Balkan <ahmetalpbalkan at gmail.com>
+"""
+
 import logging
 from sys import argv, exit, maxint
 from stat import S_IFDIR, S_IFREG
@@ -270,7 +278,35 @@ class AzureFS(LoggingMixIn, Operations):
         return dict(f_bsize=1024, f_blocks=1, f_bavail=maxint)
 
     def rename(self, old, new):
-        raise FuseOSError(ENOSYS)
+        """Three stage move operation because Azure do not have 
+        move or rename call. """
+        od,of = self._parse_path(old)
+
+        if of is None: # move dir
+            raise FuseOSError(ENOSYS)
+
+        files = self._list_container_blobs(old)
+        if of not in files:
+            raise FuseOSError(ENOENT)
+
+        src = files[of]
+
+        if src['st_mode'] & S_IFREG <= 0: # move dir
+            raise FuseOSError(ENOSYS)
+
+        fh = self.open(old, 0)
+        data = self.read(old, src['st_size'], 0, fh)
+
+        self.flush(old, fh)
+
+        fh = self.create(new, 0755)
+        if new < 0:
+            raise FuseOSError(EIO)
+        self.write(new, data, 0, fh)
+        res = self.flush(new, fh)
+
+        if res == 0:
+            self.unlink(old)
 
     def symlink(self, target, source):
         raise FuseOSError(ENOSYS)
