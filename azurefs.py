@@ -1,5 +1,5 @@
 import logging
-from sys import argv, exit
+from sys import argv, exit, maxint
 from stat import S_IFDIR, S_IFREG
 from errno import *
 from os import getuid
@@ -23,9 +23,12 @@ class AzureFS(LoggingMixIn, Operations):
 
     dirs = {} 
     files = {} #key: dirname
+    filesct = {} #<dirname, time it is cached>
+    DIR_CACHE_SECONDS = 10 # unless, explicit invalidation, ls results cached
 
     fds = {} # <fd, (path, bytes, dirty)>
     fd = 0
+
 
     def __init__(self, account, key):
         self.blobs = BlobStorage(CLOUD_BLOB_HOST, account, key)
@@ -69,7 +72,8 @@ class AzureFS(LoggingMixIn, Operations):
 
     def _list_container_blobs(self, path):
         d,f = self._parse_path(path)
-        if d in self.files:
+        if d in self.files and time.time()-self.filesct[d] \
+                               < self.DIR_CACHE_SECONDS:
             return self.files[d]
         else:
             return self._refresh_container_blobs(path)
@@ -85,6 +89,7 @@ class AzureFS(LoggingMixIn, Operations):
             l[f[0]] = dict(st_mode=(S_IFREG | 0755), st_size=f[3],
                            st_mtime=int(time.mktime(f[2])), st_uid=getuid())
         self.files[d] = l
+        self.filesct[d] = time.time()
         return l
 
     def _invalidate_dir_cache(self, path):
@@ -107,7 +112,7 @@ class AzureFS(LoggingMixIn, Operations):
                 raise FuseOSError(EACCES)
             if name.count('--') > 0:
                 log.error('Container names cannot contain consecutive dashes (-).')
-                raise FuseOSError(EACCES)
+                raise FuseOSError(EAGAIN)
             #TODO handle all "-"s must be preceded by letter or numbers
             #TODO starts with only letter or number, can contain letter, nr, dash
 
@@ -226,16 +231,11 @@ class AzureFS(LoggingMixIn, Operations):
             self._invalidate_dir_cache(path)
             return 0
         elif resp == 404:
+            self._invalidate_dir_cache(path)
             raise FuseOSError(ENOENT)
         else:
             log.error("Error occurred %d" % resp)
             raise FuseOSError(EAGAIN)
-
-    def symlink(self, target, source):
-        raise FuseOSError(ENOSYS)
-
-    def getxattr(self, path, name, position=0):
-        return ''
 
     def readdir(self, path, fh):
         if path == '/':
@@ -255,19 +255,28 @@ class AzureFS(LoggingMixIn, Operations):
             self.fds[fh] = (self.fds[fh][0], data, False)
             return data[offset:offset+size]
         except URLError, e:
-            if e.code == 404: raise FuseOSError(ENOENT)
+            if e.code == 404: 
+                self._invalidate_dir_cache(path)
+                raise FuseOSError(ENOENT)
             elif e.code == 403: raise FUSEOSError(EPERM)
             else: 
                 log.error("Read blob failed HTTP %d" % e.code)
                 raise FuseOSError(EAGAIN)
-
-
         data = self.fds[fh][1]
         if data is None: data = ""
         return data[offset:offset + size]
 
-    def destroy(self): #TODO teardown 
-        pass
+    def statfs(self, path):
+        return dict(f_bsize=1024, f_blocks=1, f_bavail=maxint)
+
+    def rename(self, old, new):
+        raise FuseOSError(ENOSYS)
+
+    def symlink(self, target, source):
+        raise FuseOSError(ENOSYS)
+
+    def getxattr(self, path, name, position=0):
+        return ''
 
 
 if __name__ == '__main__':
