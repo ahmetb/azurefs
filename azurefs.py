@@ -30,6 +30,7 @@ class AzureFS(LoggingMixIn, Operations):
     blobs = None
 
     dirs = {} 
+    subdirs = {} # </container[/f1[/f2[/f3]] : ([set of childrendirs], {filename:struct})>
     files = {} #key: dirname
     filesct = {} #<dirname, time it is cached>
     DIR_CACHE_SECONDS = 10 # unless, explicit invalidation, ls results cached
@@ -93,18 +94,40 @@ class AzureFS(LoggingMixIn, Operations):
 
         l = dict()
         for f in blobs:
-            l[f[0]] = dict(st_mode=(S_IFREG | 0755), st_size=f[3],
-                           st_mtime=int(time.mktime(f[2])), st_uid=getuid())
+            fn = f[0]
+
+            node = dict(st_mode=(S_IFREG | 0755), st_size=f[3],
+                        st_mtime=int(time.mktime(f[2])), st_uid=getuid())
+
+            if fn.find('/') == -1:
+                l[fn] = node
+            else:
+                # this is a nested file
+
+                p = '/'+c
+
+                for s in fn.split('/')[:-1]:
+                    if p not in self.subdirs:
+                        self.subdirs[p] = (set(),{})
+                    ch = self.subdirs[p][0]
+                    ch.add(s) # append subdir
+                    p += '/'+s
+                if p not in self.subdirs:
+                    self.subdirs[p] = (set(), {})
+                    # append file
+                    self.subdirs[p][1][fn.split('/')[-1]] = node
+                    
         self.files[d] = l
         self.filesct[d] = time.time()
         return l
 
     def _invalidate_dir_cache(self, path):
         d,f = self._parse_path(path)
-        try:
+        if d in self.files:
             del self.files[d]
-        except KeyError, e: 
-            pass
+            return
+        if d in self.subdirs:
+            del self.subdirs[d]
 
     # FUSE
     def mkdir(self, path, mode):
@@ -135,7 +158,7 @@ class AzureFS(LoggingMixIn, Operations):
                 raise FuseOSError(EACCES)
                 log.error("REST ERROR HTTP %d" % resp)
         else:
-            raise FuseOSError(ENOENT) #TODO support 2nd+ level mkdirs
+            raise FuseOSError(ENOSYS) #TODO support 2nd+ level mkdirs
 
     def rmdir(self, path):
         if path.count('/') < 2:
@@ -162,6 +185,17 @@ class AzureFS(LoggingMixIn, Operations):
             return self.dirs[path]
         else:
             blobs = self._list_container_blobs(path)
+
+            if path in self.subdirs:
+                return dict(st_mode = (S_IFDIR | 0755), st_size = 0,
+                            st_mtime = time.time(), st_uid = getuid(),
+                            st_nlink = 0)
+            if path.count('/') > 2: #request for nested file
+                subdir = path[:path.rfind('/')]
+                filename = path[path.rfind('/')+1:]
+                if subdir in self.subdirs and filename in self.subdirs[subdir][1]:
+                    return self.subdirs[subdir][1][filename] # file node
+
             if f not in blobs:
                 raise FuseOSError(ENOENT) #TODO refresh again for a second chance
             else:
@@ -169,15 +203,16 @@ class AzureFS(LoggingMixIn, Operations):
 
 
     def create(self, path, mode):
-        if path.count('/') == 2:
-            d,f = self._parse_path(path)
-            self.files[d][f] = dict(st_mode = (S_IFREG | mode), st_size=0, 
-                                    st_uid = getuid(), st_mtime = time.time(),
-                                    st_nlink=1)
-            
-            return self.open(path) # reusing handler provider
-
-        raise FuseOSError(ENOSYS)
+        node  = dict(st_mode = (S_IFREG | mode), st_size=0, st_nlink=1,
+                     st_uid = getuid(), st_mtime = time.time())
+        d,f = self._parse_path(path)
+        
+        if d in self.subdirs:
+            self.subdirs[d][1][f] = node
+        else:
+            self.files[d][f] = node
+        
+        return self.open(path) # reusing handler provider
 
     
     def open(self, path, flags=0):
@@ -201,15 +236,13 @@ class AzureFS(LoggingMixIn, Operations):
 
             if data is None: data = ''
 
-            d,f = self._parse_path(path)
-            c_name = self._get_container(path)
+            f_name = path[path.find('/',1)+1:]
+            c_name = path[1:path.find('/',1)]
 
-            log.info("FLUSH: %s" % data) 
-
-            print data, tmp
-            resp = self.blobs.put_blob(c_name, f, tmp)
+            resp = self.blobs.put_blob(c_name, f_name, data)
 
             if 200 <= resp < 300:
+                log.info("FLUSHED: '%s'" % data) 
                 self._invalidate_dir_cache(path)
                 self.fds[fh] = (path, data, False) # mark as not dirty
                 return 0
@@ -231,7 +264,6 @@ class AzureFS(LoggingMixIn, Operations):
             d = self.fds[fh][1] 
             if d is None: d = ""
             self.fds[fh] = (self.fds[fh][0], d[:offset] + data, True)
-            log.info("WRITTEN %s" % data) 
             return len(data)
 
     def unlink(self, path):
@@ -252,19 +284,29 @@ class AzureFS(LoggingMixIn, Operations):
 
     def readdir(self, path, fh):
         if path == '/':
-            return  ['.', '..'] + [(x[1:]) for x in self.dirs if x != '/']
+            return  ['.', '..'] + [(x[1:]) for x in self.dirs if x != '/' and x.count('/')==1]
         else:
-            blobs = self._list_container_blobs(path)
-            return ['.', '..'] + blobs.keys()
+            blobs, subdirs,nestedblobs = [],[],[]
+            if path.count('/') == 1:
+                blob_map = self._list_container_blobs(path)
+                blobs = blob_map.keys()
+            if path in self.subdirs:
+                subdirs = list(self.subdirs[path][0])
+            if path.count('/') > 1:
+                nestedblobs = self.subdirs[path][1].keys()
+
+            return ['.', '..'] + subdirs + blobs + nestedblobs
 
     def read(self, path, size, offset, fh):
         if not fh or fh not in self.fds:
             raise FuseOSError(ENOENT)
-        c_name = self._get_container(path)
-        d, f= self._parse_path(path)
+        f_name = path[path.find('/',1)+1:]
+        c_name = path[1:path.find('/',1)]
+
+        print('Read c:%s f:%s' % (c_name, f_name)) 
         
         try:
-            data = self.blobs.get_blob(c_name, f)
+            data = self.blobs.get_blob(c_name, f_name)
             self.fds[fh] = (self.fds[fh][0], data, False)
             return data[offset:offset+size]
         except URLError, e:
