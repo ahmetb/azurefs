@@ -29,11 +29,7 @@ class AzureFS(LoggingMixIn, Operations):
 
     blobs = None
 
-    dirs = {} 
-    subdirs = {} # </container[/f1[/f2[/f3]] : ([set of childrendirs], {filename:struct})>
-    files = {} #key: dirname
-    filesct = {} #<dirname, time it is cached>
-    DIR_CACHE_SECONDS = 10 # unless, explicit invalidation, ls results cached
+    containers = {} # <cname, dict(stat:dict, files:None|dict<fname, stat>)
 
     fds = {} # <fd, (path, bytes, dirty)>
     fd = 0
@@ -41,27 +37,25 @@ class AzureFS(LoggingMixIn, Operations):
 
     def __init__(self, account, key):
         self.blobs = BlobStorage(CLOUD_BLOB_HOST, account, key)
-        now = time.time()
-        uid = getuid()
+        self.rebuild_container_list()
 
-        self._refresh_dirs()
-
-    def _fetch_containers(self):
-        r = {} 
+    def rebuild_container_list(self):
+        cmap = {}
+        cnames = set() 
         for c in self.blobs.list_containers():
-            r['/'+c[0]] = dict(st_mode = (S_IFDIR | 0755), st_uid = getuid(),
-                               st_mtime = int(time.mktime(c[2])), st_size = 0,
-                               st_nlink = 2)
-        return r
+            cstat = dict(st_mode = (S_IFDIR | 0755), st_uid = getuid(),
+                               st_mtime = int(time.mktime(c[2])), st_size = 0)
+            cname = c[0]
+            cmap['/'+cname] = dict(stat=cstat, files=None)
+            cnames.add(cname)
 
-    def _refresh_dirs(self):
-        self.dirs = self._fetch_containers()
+        cmap['/'] = dict(files = {},
+                         stat = dict(st_mode = (S_IFDIR), st_uid=getuid(),
+                                     st_size = 0, st_mtime=int(time.time()))
+                         )
 
-        # add root directory
-        self.dirs['/'] = dict(st_mode = (S_IFDIR | 0755), st_uid = getuid(),
-                                 st_mtime = time.time(), st_size=0 , st_nlink=2)
-        return self.dirs
-    
+        self.containers = cmap   # destroys fs tree cache but resistant to misses
+
     def _parse_path(self, path): # returns </dir, file(=None)>
         if path.count('/') > 1: #file
             return path[:path.rfind('/')], path[path.rfind('/')+1:]
@@ -72,62 +66,70 @@ class AzureFS(LoggingMixIn, Operations):
             else:
                 return path[:pos], None
 
-    def _get_container(self, path):
+    def parse_container(self, path):
         base_container = path[1:] #/abc/def/g --> abc
         if base_container.find('/') > -1:
             base_container = base_container[:base_container.find('/')]
         return base_container
 
-    def _list_container_blobs(self, path):
-        d,f = self._parse_path(path)
-        if d in self.files and time.time()-self.filesct[d] \
-                               < self.DIR_CACHE_SECONDS:
-            return self.files[d]
+    def _get_dir(self, path, contents_required=False):
+        if not self.containers or len(self.containers) == 0 or \
+                (path.count('/')==1 and path not in self.containers):
+            self.rebuild_container_list()
+
+        if path in self.containers and not (contents_required and self.containers[path]['files'] is None):
+            return self.containers[path]
+
+        cname = self.parse_container(path)
+
+        if '/'+cname not in self.containers:
+            raise FuseOSError(ENOENT)
         else:
-            return self._refresh_container_blobs(path)
+            if self.containers['/'+cname]['files'] is None:    # retrieve contents
+                log.info("------> CONTENTS NOT FOUND: %s" % cname)
+
+                blobs = self.blobs.list_blobs(cname)
+
+                dirstat = dict(st_mode= (S_IFDIR|0755), st_size=0, st_uid=getuid(),
+                               st_mtime=time.time())  
+
+                if self.containers['/'+cname]['files'] is None:
+                    self.containers['/'+cname]['files'] = dict()
+
+                for f in blobs:
+                    blob_name = f[0]
+
+                    node = dict(st_mode=(S_IFREG | 0644), st_size=f[3],
+                                         st_mtime=int(time.mktime(f[2])), 
+                                         st_uid=getuid())
+
+                    if blob_name.find('/') == -1:       # file just under container
+                        self.containers['/'+cname]['files'][blob_name] = node
+
+            return self.containers['/'+cname]
+        return None
 
 
-    def _refresh_container_blobs(self, path):
+    def _get_file(self, path):
         d,f = self._parse_path(path)
-        c = self._get_container(path)
-        blobs = self.blobs.list_blobs(c)
+        
+        dir = self._get_dir(d, True)
+        if dir is not None and f in dir['files']:
+            return dir['files'][f] 
 
-        l = dict()
-        for f in blobs:
-            fn = f[0]
-
-            node = dict(st_mode=(S_IFREG | 0755), st_size=f[3],
-                        st_mtime=int(time.mktime(f[2])), st_uid=getuid())
-
-            if fn.find('/') == -1:
-                l[fn] = node
-            else:
-                # this is a nested file
-
-                p = '/'+c
-
-                for s in fn.split('/')[:-1]:
-                    if p not in self.subdirs:
-                        self.subdirs[p] = (set(),{})
-                    ch = self.subdirs[p][0]
-                    ch.add(s) # append subdir
-                    p += '/'+s
-                if p not in self.subdirs:
-                    self.subdirs[p] = (set(), {})
-                    # append file
-                    self.subdirs[p][1][fn.split('/')[-1]] = node
-                    
-        self.files[d] = l
-        self.filesct[d] = time.time()
-        return l
-
-    def _invalidate_dir_cache(self, path):
+    def getattr(self, path, fh=None):
         d,f = self._parse_path(path)
-        if d in self.files:
-            del self.files[d]
-            return
-        if d in self.subdirs:
-            del self.subdirs[d]
+
+        if f is None:
+            dir = self._get_dir(d)
+            return dir['stat']
+        else:
+            file = self._get_file(path)
+
+            if file:
+                return file 
+
+        raise FuseOSError(ENOENT)
 
     # FUSE
     def mkdir(self, path, mode):
@@ -147,9 +149,9 @@ class AzureFS(LoggingMixIn, Operations):
             #TODO starts with only letter or number, can contain letter, nr, dash
 
             resp = self.blobs.create_container(name)
-            
+
             if 200 <= resp < 300:
-                self._refresh_dirs()
+                self.rebuild_container_list()
                 log.info("CONTAINER %s CREATED" % name)
             elif resp == 409:
                 log.error("REST ERROR HTTP %d" % resp)
@@ -161,12 +163,13 @@ class AzureFS(LoggingMixIn, Operations):
             raise FuseOSError(ENOSYS) #TODO support 2nd+ level mkdirs
 
     def rmdir(self, path):
-        if path.count('/') < 2:
+        if path.count('/') == 1:
             c_name = path[1:]
             resp = self.blobs.delete_container(c_name)
 
             if 200 <= resp < 300:
-                self._refresh_dirs() # OK, reconstuct 
+                if path in self.containers:
+                    del self.containers[path]
             else:
                 if resp == 404:
                     log.info("Container %s not found." % c_name)
@@ -176,75 +179,79 @@ class AzureFS(LoggingMixIn, Operations):
             raise FuseOSError(ENOSYS)  #TODO support 2nd+ level mkdirs
 
 
-    def getattr(self, path, fh=None):
-        d,f = self._parse_path(path)
-
-        if f is None: # dir
-            if path not in self.dirs:
-                raise FuseOSError(ENOENT)
-            return self.dirs[path]
-        else:
-            blobs = self._list_container_blobs(path)
-
-            if path in self.subdirs:
-                return dict(st_mode = (S_IFDIR | 0755), st_size = 0,
-                            st_mtime = time.time(), st_uid = getuid(),
-                            st_nlink = 0)
-            if path.count('/') > 2: #request for nested file
-                subdir = path[:path.rfind('/')]
-                filename = path[path.rfind('/')+1:]
-                if subdir in self.subdirs and filename in self.subdirs[subdir][1]:
-                    return self.subdirs[subdir][1][filename] # file node
-
-            if f not in blobs:
-                raise FuseOSError(ENOENT) #TODO refresh again for a second chance
-            else:
-                return blobs[f]
 
 
     def create(self, path, mode):
         node  = dict(st_mode = (S_IFREG | mode), st_size=0, st_nlink=1,
                      st_uid = getuid(), st_mtime = time.time())
         d,f = self._parse_path(path)
-        
-        if d in self.subdirs:
-            self.subdirs[d][1][f] = node
-        else:
-            self.files[d][f] = node
-        
-        return self.open(path) # reusing handler provider
+
+        if not f: 
+            log.error("Cannot create files on root level: /")
+            raise FuseOSError(ENOSYS)
+
+        dir = self._get_dir(d, True)
+        if not dir:
+            raise FuseOSError(EIO)
+        dir['files'][f] = node
+
+        return self.open(path, data='') # reusing handler provider
 
     
-    def open(self, path, flags=0):
+    def open(self, path, flags=0, data=None):
+        if data == None:                # download contents
+            c_name = self.parse_container(path)
+            f_name = path[path.find('/',1)+1:]
+
+            try:
+                data = self.blobs.get_blob(c_name, f_name)
+            except URLError, e:
+                if e.code == 404: 
+                    raise FuseOSError(ENOENT)
+                elif e.code == 403: raise FUSEOSError(EPERM)
+                else: 
+                    log.error("Read blob failed HTTP %d" % e.code)
+
         self.fd += 1
-        self.fds[self.fd] = (path, "", True)
+        self.fds[self.fd] = (path, data, False)
+
+
         return self.fd
 
-    def flush(self, path, fh=None): #TODO
+    def flush(self, path, fh=None): 
         if not fh:
             raise FuseOSError(EIO)
-            #TODO find from path param
         else:
             if fh not in self.fds:
                 raise FuseOSError(EIO)
             path = self.fds[fh][0]
             data = self.fds[fh][1]
             dirty = self.fds[fh][2]
+            
+            print self.fds[fh]
 
             if not dirty:
                 return 0 # avoid redundant write
-
+            
             if data is None: data = ''
 
-            f_name = path[path.find('/',1)+1:]
-            c_name = path[1:path.find('/',1)]
+            d,f = self._parse_path(path)
+            c_name = self.parse_container(path)
 
-            resp = self.blobs.put_blob(c_name, f_name, data)
+            resp = self.blobs.put_blob(c_name, f, data)
 
             if 200 <= resp < 300:
                 log.info("FLUSHED: '%s'" % data) 
-                self._invalidate_dir_cache(path)
                 self.fds[fh] = (path, data, False) # mark as not dirty
+                
+                dir = self._get_dir(d, True)
+                if not dir or f not in dir['files']:
+                    raise FuseOSError(EIO)
+
+                # update local data
+                dir['files'][f]['st_size'] = len(data)
+                dir['files'][f]['st_mtime'] = time.time()
+
                 return 0
             else:
                 log.error("Flush error HTTP %d" % resp)
@@ -264,19 +271,21 @@ class AzureFS(LoggingMixIn, Operations):
             d = self.fds[fh][1] 
             if d is None: d = ""
             self.fds[fh] = (self.fds[fh][0], d[:offset] + data, True)
+            print 'DATA: %s' % d[:offset]+data
             return len(data)
 
     def unlink(self, path):
-        c_name = self._get_container(path)
+        c_name = self.parse_container(path)
         d,f = self._parse_path(path)
 
         resp = self.blobs.delete_blob(c_name, f)
         log.info("UNLINK REST RESPONSE %d" % resp)
         if 200 <= resp < 300:
-            self._invalidate_dir_cache(path)
+            dir = self._get_dir(path, True)
+            if dir and f in dir['files']:
+                del dir['files'][f]
             return 0
         elif resp == 404:
-            self._invalidate_dir_cache(path)
             raise FuseOSError(ENOENT)
         else:
             log.error("Error occurred %d" % resp)
@@ -284,34 +293,26 @@ class AzureFS(LoggingMixIn, Operations):
 
     def readdir(self, path, fh):
         if path == '/':
-            return  ['.', '..'] + [(x[1:]) for x in self.dirs if x != '/' and x.count('/')==1]
-        else:
-            blobs, subdirs,nestedblobs = [],[],[]
-            if path.count('/') == 1:
-                blob_map = self._list_container_blobs(path)
-                blobs = blob_map.keys()
-            if path in self.subdirs:
-                subdirs = list(self.subdirs[path][0])
-            if path.count('/') > 1:
-                nestedblobs = self.subdirs[path][1].keys()
+            return ['.', '..'] + [x[1:] for x in self.containers.keys() if x != '/']
 
-            return ['.', '..'] + subdirs + blobs + nestedblobs
+        dir = self._get_dir(path, True)
+        if not dir:
+            raise FuseOSError(ENOENT)
+        return ['.', '..'] + dir['files'].keys()
 
     def read(self, path, size, offset, fh):
         if not fh or fh not in self.fds:
             raise FuseOSError(ENOENT)
+
         f_name = path[path.find('/',1)+1:]
         c_name = path[1:path.find('/',1)]
 
-        print('Read c:%s f:%s' % (c_name, f_name)) 
-        
         try:
             data = self.blobs.get_blob(c_name, f_name)
             self.fds[fh] = (self.fds[fh][0], data, False)
             return data[offset:offset+size]
         except URLError, e:
             if e.code == 404: 
-                self._invalidate_dir_cache(path)
                 raise FuseOSError(ENOENT)
             elif e.code == 403: raise FUSEOSError(EPERM)
             else: 
@@ -346,7 +347,7 @@ class AzureFS(LoggingMixIn, Operations):
 
         self.flush(old, fh)
 
-        fh = self.create(new, 0755)
+        fh = self.create(new, 0644)
         if new < 0:
             raise FuseOSError(EIO)
         self.write(new, data, 0, fh)
