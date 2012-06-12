@@ -23,6 +23,8 @@ if __name__ == '__main__':
     log.addHandler(ch)
     log.setLevel(logging.DEBUG)
 
+if not hasattr(__builtins__, 'bytes'):
+    bytes = str
 
 class AzureFS(LoggingMixIn, Operations):
     'Azure Blob Storage filesystem'
@@ -73,8 +75,7 @@ class AzureFS(LoggingMixIn, Operations):
         return base_container
 
     def _get_dir(self, path, contents_required=False):
-        if not self.containers or len(self.containers) == 0 or \
-                (path.count('/')==1 and path not in self.containers):
+        if not self.containers:
             self.rebuild_container_list()
 
         if path in self.containers and not (contents_required and self.containers[path]['files'] is None):
@@ -207,10 +208,14 @@ class AzureFS(LoggingMixIn, Operations):
                 data = self.blobs.get_blob(c_name, f_name)
             except URLError, e:
                 if e.code == 404: 
+                    dir = self._get_dir('/'+c_name, True)
+                    if f_name in dir['files']:
+                        del dir['files'][f_name]
                     raise FuseOSError(ENOENT)
                 elif e.code == 403: raise FUSEOSError(EPERM)
                 else: 
                     log.error("Read blob failed HTTP %d" % e.code)
+                    raise FuseOSError(EAGAIN)
 
         self.fd += 1
         self.fds[self.fd] = (path, data, False)
@@ -228,8 +233,6 @@ class AzureFS(LoggingMixIn, Operations):
             data = self.fds[fh][1]
             dirty = self.fds[fh][2]
             
-            print self.fds[fh]
-
             if not dirty:
                 return 0 # avoid redundant write
             
