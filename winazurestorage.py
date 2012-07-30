@@ -336,6 +336,7 @@ class BlobStorage(Storage):
         req.add_header("Content-Type", content_type)
         self._credentials.sign_request(req)
         try:
+            print 'Uploading file content: %s' % base64.encodestring(data)
             response = urlopen(req)
             return response.code
         except URLError, e:
