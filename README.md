@@ -59,8 +59,7 @@ a file e.g. `date >> date.txt`.
 
 Here's a neat blog post explains the project, highly recommended read:
 
-(<!-- blog post here -->)
-
+** http://ahmetalpbalkan.com/blog/introducing-azurefs/ **
 
 ### Current significant limitations
 

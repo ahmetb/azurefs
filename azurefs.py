@@ -382,5 +382,5 @@ if __name__ == '__main__':
     if len(argv) < 4:
         print('Usage: %s <mount_directory> <account> <secret_key>' % argv[0])
         exit(1)
-    fuse = FUSE(AzureFS(argv[2], argv[3]), argv[1], debug=True,
+    fuse = FUSE(AzureFS(argv[2], argv[3]), argv[1], debug=False,
             nothreads=False, foreground=True)
