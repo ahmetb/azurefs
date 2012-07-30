@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# encoding: utf-8
 """
 A FUSE wrapper for locally mounting Azure blob storage
 
@@ -41,6 +40,7 @@ class AzureFS(LoggingMixIn, Operations):
         self.blobs = BlobStorage(CLOUD_BLOB_HOST, account, key)
         self.rebuild_container_list()
 
+
     def rebuild_container_list(self):
         cmap = {}
         cnames = set() 
@@ -60,19 +60,19 @@ class AzureFS(LoggingMixIn, Operations):
 
     def _parse_path(self, path): # returns </dir, file(=None)>
         if path.count('/') > 1: #file
-            return path[:path.rfind('/')], path[path.rfind('/')+1:]
+            return str(path[:path.rfind('/')]), str(path[path.rfind('/')+1:])
         else: #dir
             pos = path.rfind('/',1)
             if pos == -1:
                 return path, None
             else:
-                return path[:pos], None
+                return str(path[:pos]), None
 
     def parse_container(self, path):
         base_container = path[1:] #/abc/def/g --> abc
         if base_container.find('/') > -1:
             base_container = base_container[:base_container.find('/')]
-        return base_container
+        return str(base_container)
 
     def _get_dir(self, path, contents_required=False):
         if not self.containers:
@@ -244,7 +244,6 @@ class AzureFS(LoggingMixIn, Operations):
             resp = self.blobs.put_blob(c_name, f, data)
 
             if 200 <= resp < 300:
-                log.info("FLUSHED: '%s'" % data) 
                 self.fds[fh] = (path, data, False) # mark as not dirty
                 
                 dir = self._get_dir(d, True)
@@ -274,7 +273,6 @@ class AzureFS(LoggingMixIn, Operations):
             d = self.fds[fh][1] 
             if d is None: d = ""
             self.fds[fh] = (self.fds[fh][0], d[:offset] + data, True)
-            print 'DATA: %s' % d[:offset]+data
             return len(data)
 
     def unlink(self, path):
