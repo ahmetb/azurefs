@@ -5,32 +5,90 @@ A FUSE wrapper for **Windows Azure Blob Storage**. It provides basic
 functionality to mount Azure Blob Storage as a local filesystem to
 your computer.
 
-> **NOTE:** This project is still under development and should not be
-considered for production use.
+### Introduction & Aim
+
+There is no user-friendly interface to manage files on Azure cloud 
+storage. Sometimes we need to:
+
+* **list** files under a container
+* **transfer** a bunch of local files to the cloud
+* **remove** files matching a specific name pattern
+* **rename** files on the cloud
+* **move** files accross containers
+
+AzureFS is a **command-line interface** where you can mount your Windows
+Azure storage account as a folder on your computer and accomplish
+such everyday tasks practically using UNIX commands like `ls`, `mkdir`, `cp` etc.
+
+It is neither rock-solid nor should be used except for manual tasks. 
+Your programs should communicate Windows Azure Storage service via
+its REST API.
+
+### Installation
+
+1. This project requires `fusepy`:
+
+    git clone https://github.com/terencehonles/fusepy.git
+    cd fusepy
+    sudo python setup.py install
+
+2. This project requires `libfuse2`, `fuse-utils` and `libfuse-dev`.
+On Debian/Ubuntu:
+
+    apt-get install libfuse2 fuse-utils libfuse-dev
+
+3. `sudo chmod 777 /etc/fuse.conf`
+
+### Usage
+
+1. Create a folder for your mount point e.g. `mkdir /home/john/azure_folder`
+
+2. Navigate to `azurefs` folder you cloned from this repo
+
+3. Run `python azurefs.py <MOUNT_POINT> <YOUR_STORAGE_ACCOUNT> <STORAGE_SECRET_KEY>`
+
+4. Do not shutdown this process, in some other tab, navigate to your mount
+point e.g. `azure_folder`.
+
+5. To try something out, create a container by `mkdir mycontainer`, and create
+a file e.g. `date >> date.txt`.
+
+6. You are ready to go. When you're done, simply hit `Ctrl-C` to unmount.
+
+### Tutorial
+
+Here's a neat blog post explains the project, highly recommended read:
+
+(<!-- blog post here -->)
+
 
 ### Current significant limitations
 
-* Single-level file hierarchy (/container/file)
-* Untested multithreading support
+* Single-level file hierarchy (/container/file), no nested dirs.
 * Untested Mac OS X support
-* Untested reads and writes with offsets
 * Files larger than 64 MB not supported (requires page blobs)
-* No support for files in root level ($root container)
+* No support for files on root level ($root container)* 
+* Freezes GUI environments e.g. standard Ubuntu; works fine on Ubuntu Serv* * r
+
+* Couldn't make use of [delete container](http://msdn.microsoft.com/en-us/library/windowsazure/dd179408.aspx) REST API call due to UNIX VFS interface. 
+Therefore if you attempt to `rm -rf` a container with 1000s of files, you'll wait a 
+lot. Instead, do it programmatically.
 
 ### Licensing
-AzureFS, copyright 2012 Ahmet Alp Balkan. Licensed under Apache License
-Version 2.0, see http://www.apache.org/licenses/LICENSE-2.0.html
 
-This project is not affiliated with Windows Azure(TM) and
-not supported by Microsoft Corporation (C).
+**AzureFS**, copyright 2012 **Ahmet Alp Balkan**. Licensed under Apache
+License Version 2.0, see http://www.apache.org/licenses/LICENSE-2.0.html
 
-WinAzureStorage, copyright Sriram Krishnan and Steve Marx.
+This project is neither affiliated with Windows Azure(TM) nor
+supported by Microsoft Corporation (C). Use it at your own risk.
+
+**WinAzureStorage**, copyright Sriram Krishnan and Steve Marx.
 Project available on https://github.com/sriramk/winazurestorage
 
-FusePy, licensed under New BSD License. Project available on
+**FusePy**, licensed under New BSD License. Project available on
 https://github.com/terencehonles/fusepy
 
+### Author(s)
 
-### Authors
 Ahmet Alp Balkan 'ahmetalpbalkan at gmail.com'
 

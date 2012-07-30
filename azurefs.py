@@ -232,14 +232,17 @@ class AzureFS(LoggingMixIn, Operations):
             path = self.fds[fh][0]
             data = self.fds[fh][1]
             dirty = self.fds[fh][2]
-            
+
             if not dirty:
                 return 0 # avoid redundant write
             
-            if data is None: data = ''
-
             d,f = self._parse_path(path)
             c_name = self.parse_container(path)
+            if data is None: data = ''
+
+            if len(data) >= 1<<26: # 64mb
+                log.error("Files larger than 64 MB are not supported currently.")
+                raise FuseOSError(EFBIG)
 
             resp = self.blobs.put_blob(c_name, f, data)
 
@@ -371,5 +374,5 @@ if __name__ == '__main__':
     if len(argv) < 4:
         print('Usage: %s <mount_directory> <account> <secret_key>' % argv[0])
         exit(1)
-    fuse = FUSE(AzureFS(argv[2], argv[3]), argv[1], debug=True)
+    fuse = FUSE(AzureFS(argv[2], argv[3]), argv[1], debug=True, nothreads=False, foreground=True)
 
