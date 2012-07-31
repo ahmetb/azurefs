@@ -78,8 +78,7 @@ Here's a neat blog post explains the project, highly recommended read:
 * Single-level file hierarchy (/container/file), no nested dirs.
 * Untested Mac OS X support
 * No support for files on root level ($root container)* 
-* Freezes GUI environments e.g. standard Ubuntu; works fine on Ubuntu Serv* * r
-
+* Freezes GUI environments e.g. standard Ubuntu; works fine on Ubuntu Server
 * Couldn't make use of [delete container](http://msdn.microsoft.com/en-us/library/windowsazure/dd179408.aspx) REST API call due to UNIX VFS interface. 
 Therefore if you attempt to `rm -rf` a container with 1000s of files, you'll wait a 
 lot. Instead, do it programmatically.
@@ -92,10 +91,13 @@ License Version 2.0, see http://www.apache.org/licenses/LICENSE-2.0.html
 This project is neither affiliated with Windows Azure(TM) nor
 supported by Microsoft Corporation (C). Use it at your own risk.
 
-**Azure SDK for Python**, copyright Microsoft Corporation (C).
+#### Dependency Licenses
+
+**Azure SDK for Python**, copyright Microsoft Corporation (C). Licensed
+under Apache License Version 2.0
 Project available on https://github.com/WindowsAzure/azure-sdk-for-python
 
-**FusePy**, licensed under New BSD License. Project available on
+**fusepy**, licensed under New BSD License. Project available on
 https://github.com/terencehonles/fusepy
 
 ### Author(s)
