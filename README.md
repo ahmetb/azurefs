@@ -71,7 +71,6 @@ Here's a neat blog post explains the project, highly recommended read:
 
 * Single-level file hierarchy (/container/file), no nested dirs.
 * Untested Mac OS X support
-* Files larger than 64 MB not supported (requires page blobs)
 * No support for files on root level ($root container)* 
 * Freezes GUI environments e.g. standard Ubuntu; works fine on Ubuntu Serv* * r
 

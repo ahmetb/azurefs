@@ -5,8 +5,11 @@ A FUSE wrapper for locally mounting Azure blob storage
 Ahmet Alp Balkan <ahmetalpbalkan at gmail.com>
 """
 
-import logging
+import math
 import time
+import logging
+import random
+import base64
 
 from sys import argv, exit, maxint
 from stat import S_IFDIR, S_IFREG
@@ -14,7 +17,8 @@ from errno import *
 from os import getuid
 from datetime import datetime
 from fuse import FUSE, FuseOSError, Operations, LoggingMixIn
-from azure.storage import BlobService
+from azure.storage import BlobService, WindowsAzureError, \
+        WindowsAzureMissingResourceError
 
 
 TIME_FORMAT = '%a, %d %b %Y %H:%M:%S %Z'
@@ -28,6 +32,7 @@ if __name__ == '__main__':
     log.addHandler(ch)
     log.setLevel(logging.DEBUG)
 
+
 class AzureFS(LoggingMixIn, Operations):
     """Azure Blob Storage filesystem"""
 
@@ -36,7 +41,6 @@ class AzureFS(LoggingMixIn, Operations):
                                     #files:None|dict<fname, stat>)
     fds = dict()  # <fd, (path, bytes, dirty)>
     fd = 0
-
 
     def __init__(self, account, key):
         self.blobs = BlobService(account, key)
@@ -207,17 +211,14 @@ class AzureFS(LoggingMixIn, Operations):
 
             try:
                 data = self.blobs.get_blob(c_name, f_name)
-            except URLError as e:
-                if e.code == 404:
-                    dir = self._get_dir('/' + c_name, True)
-                    if f_name in dir['files']:
-                        del dir['files'][f_name]
-                    raise FuseOSError(ENOENT)
-                elif e.code == 403:
-                    raise FUSEOSError(EPERM)
-                else:
-                    log.error("Read blob failed HTTP %d" % e.code)
-                    raise FuseOSError(EAGAIN)
+            except WindowsAzureMissingResourceError:
+                dir = self._get_dir('/' + c_name, True)
+                if f_name in dir['files']:
+                    del dir['files'][f_name]
+                raise FuseOSError(ENOENT)
+            except WindowsAzureError as e:
+                log.error("Read blob failed HTTP %d" % e.code)
+                raise FuseOSError(EAGAIN)
 
         self.fd += 1
         self.fds[self.fd] = (path, data, False)
@@ -243,27 +244,37 @@ class AzureFS(LoggingMixIn, Operations):
             if data is None:
                 data = ''
 
-            if len(data) >= 1 << 26:   # 64mb
-                log.error("Files larger than 64 MB are not supported \
-                        currently.")
-                raise FuseOSError(EFBIG)
+            try:
+                if len(data) < 64 * 1024 * 1024:   # 64 mb
+                    self.blobs.put_blob(c_name, f, data, 'BlockBlob')
+                else:
+                    # divide file by blocks and upload
+                    block_size = 8 * 1024 * 1024
+                    num_blocks = int(math.ceil(len(data) * 1.0 / block_size))
+                    rd = str(random.randint(1, 1e8))
+                    block_ids = list()
 
-            try: 
-                self.blobs.put_blob(c_name, f, data, 'BlockBlob')
+                    for i in range(num_blocks):
+                        part = data[i * block_size:min((i + 1) * block_size,
+                            len(data))]
+                        block_id = base64.encodestring('%s_%s' % (rd,
+                            (8 - len(str(i))) * '0' + str(i)))
+                        self.blobs.put_block(c_name, f, part, block_id)
+                        block_ids.append(block_id)
 
-                dir = self._get_dir(d, True)
-                if not dir or f not in dir['files']:
-                    raise FuseOSError(EIO)
-
-                # update local data
-                dir['files'][f]['st_size'] = len(data)
-                dir['files'][f]['st_mtime'] = time.time()
-                return 0
-            except Exception as e:
-                log.error("Flush error HTTP %d" % e)
+                    self.blobs.put_block_list(c_name, f, block_ids)
+            except WindowsAzureError:
                 raise FuseOSError(EAGAIN)
 
-                self.fds[fh] = (path, data, False)  # mark as not dirty
+            dir = self._get_dir(d, True)
+            if not dir or f not in dir['files']:
+                raise FuseOSError(EIO)
+
+            # update local data
+            dir['files'][f]['st_size'] = len(data)
+            dir['files'][f]['st_mtime'] = time.time()
+            self.fds[fh] = (path, data, False)  # mark as not dirty
+            return 0
 
     def release(self, path, fh=None):
         if fh is not None and fh in self.fds:
@@ -286,7 +297,7 @@ class AzureFS(LoggingMixIn, Operations):
         c_name = self.parse_container(path)
         d, f = self._parse_path(path)
 
-        try: 
+        try:
             self.blobs.delete_blob(c_name, f)
 
             _dir = self._get_dir(path, True)
@@ -383,5 +394,5 @@ if __name__ == '__main__':
     if len(argv) < 4:
         print('Usage: %s <mount_directory> <account> <secret_key>' % argv[0])
         exit(1)
-    fuse = FUSE(AzureFS(argv[2], argv[3]), argv[1], debug=True,
+    fuse = FUSE(AzureFS(argv[2], argv[3]), argv[1], debug=False,
             nothreads=False, foreground=True)
