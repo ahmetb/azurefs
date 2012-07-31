@@ -32,6 +32,12 @@ its REST API.
     cd fusepy
     sudo python setup.py install
 
+2. This project requires `azure-sdk-for-python`. Run `sudo easy_install azure` or `sudo pip install azure` or
+
+    git clone https://github.com/WindowsAzure/azure-sdk-for-python.git
+    cd azure-sdk-for-python/src
+    sudo python setup.py install
+
 2. This project requires `libfuse2`, `fuse-utils` and `libfuse-dev`.
 On Debian/Ubuntu:
 
@@ -81,8 +87,8 @@ License Version 2.0, see http://www.apache.org/licenses/LICENSE-2.0.html
 This project is neither affiliated with Windows Azure(TM) nor
 supported by Microsoft Corporation (C). Use it at your own risk.
 
-**WinAzureStorage**, copyright Sriram Krishnan and Steve Marx.
-Project available on https://github.com/sriramk/winazurestorage
+**Azure SDK for Python**, copyright Microsoft Corporation (C).
+Project available on https://github.com/WindowsAzure/azure-sdk-for-python
 
 **FusePy**, licensed under New BSD License. Project available on
 https://github.com/terencehonles/fusepy
