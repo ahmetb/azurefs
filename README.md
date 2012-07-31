@@ -26,24 +26,30 @@ its REST API.
 
 ### Installation
 
-1. This project requires `fusepy`:
+This project requires `fusepy`:
 
-    git clone https://github.com/terencehonles/fusepy.git
-    cd fusepy
-    sudo python setup.py install
+```
+git clone https://github.com/terencehonles/fusepy.git
+cd fusepy
+sudo python setup.py install
+```
 
-2. This project requires `azure-sdk-for-python`. Run `sudo easy_install azure` or `sudo pip install azure` or
+Install `azure-sdk-for-python`. Run `sudo easy_install azure` or `sudo pip install azure` or
 
-    git clone https://github.com/WindowsAzure/azure-sdk-for-python.git
-    cd azure-sdk-for-python/src
-    sudo python setup.py install
+```
+git clone https://github.com/WindowsAzure/azure-sdk-for-python.git
+cd azure-sdk-for-python/src
+sudo python setup.py install
+```
 
-2. This project requires `libfuse2`, `fuse-utils` and `libfuse-dev`.
+Install `libfuse2`, `fuse-utils` and `libfuse-dev` dependencies.
 On Debian/Ubuntu:
 
-    apt-get install libfuse2 fuse-utils libfuse-dev
+```
+apt-get install libfuse2 fuse-utils libfuse-dev
+```
 
-3. `sudo chmod 777 /etc/fuse.conf`
+(Optional: run `sudo chmod 777 /etc/fuse.conf`)
 
 ### Usage
 
