@@ -75,9 +75,10 @@ Here's a neat blog post explains the project, highly recommended read:
 
 ### Current significant limitations
 
-* Single-level file hierarchy (/container/file), no nested dirs.
-* Untested Mac OS X support
-* No support for files on root level ($root container)* 
+* Single-level file hierarchy (i.e. `/container/file`)
+    - Nested directories (i.e `/container/directory/file`) are not supported.
+* Untested Mac OS X support (probably won't work)
+* No support for files on root level (container name is `$root`)
 * Freezes GUI environments e.g. standard Ubuntu; works fine on Ubuntu Server
 * Couldn't make use of [delete container](http://msdn.microsoft.com/en-us/library/windowsazure/dd179408.aspx) REST API call due to UNIX VFS interface. 
 Therefore if you attempt to `rm -rf` a container with 1000s of files, you'll wait a 
