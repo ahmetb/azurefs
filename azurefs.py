@@ -17,8 +17,8 @@ from errno import *
 from os import getuid
 from datetime import datetime
 from fuse import FUSE, FuseOSError, Operations, LoggingMixIn
-from azure.storage import BlobService, WindowsAzureError, \
-        WindowsAzureMissingResourceError
+from azure.storage import BlobService, WindowsAzureError
+from azure import WindowsAzureMissingResourceError
 
 
 TIME_FORMAT = '%a, %d %b %Y %H:%M:%S %Z'
