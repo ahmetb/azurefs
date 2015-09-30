@@ -14,7 +14,7 @@ storage. Sometimes we need to:
 * **transfer** a bunch of local files to the cloud
 * **remove** files matching a specific name pattern
 * **rename** files on the cloud
-* **move** files accross containers
+* **move** files across containers
 
 AzureFS is a **command-line interface** where you can mount your Windows
 Azure storage account as a folder on your computer and accomplish
