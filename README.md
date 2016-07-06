@@ -37,9 +37,9 @@ sudo python setup.py install
 Install `azure-sdk-for-python`. Run `sudo easy_install azure` or `sudo pip install azure` or
 
 ```
-git clone https://github.com/WindowsAzure/azure-sdk-for-python.git
-cd azure-sdk-for-python/src
-sudo python setup.py install
+git clone git://github.com/Azure/azure-sdk-for-python.git
+cd azure-sdk-for-python
+python setup.py install
 ```
 
 Install `libfuse2`, `fuse-utils` and `libfuse-dev` dependencies.

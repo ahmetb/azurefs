@@ -17,8 +17,8 @@ from errno import *
 from os import getuid
 from datetime import datetime
 from fuse import FUSE, FuseOSError, Operations, LoggingMixIn
-from azure.storage import BlobService, WindowsAzureError
-from azure import WindowsAzureMissingResourceError
+from azure.common import AzureException, AzureMissingResourceHttpError
+from azure.storage.blob import BlobService
 
 
 TIME_FORMAT = '%a, %d %b %Y %H:%M:%S %Z'
@@ -211,12 +211,12 @@ class AzureFS(LoggingMixIn, Operations):
 
             try:
                 data = self.blobs.get_blob(c_name, f_name)
-            except WindowsAzureMissingResourceError:
+            except AzureMissingResourceHttpError:
                 dir = self._get_dir('/' + c_name, True)
                 if f_name in dir['files']:
                     del dir['files'][f_name]
                 raise FuseOSError(ENOENT)
-            except WindowsAzureError as e:
+            except AzureException as e:
                 log.error("Read blob failed HTTP %d" % e.code)
                 raise FuseOSError(EAGAIN)
 
@@ -263,7 +263,7 @@ class AzureFS(LoggingMixIn, Operations):
                         block_ids.append(block_id)
 
                     self.blobs.put_block_list(c_name, f, block_ids)
-            except WindowsAzureError:
+            except AzureException:
                 raise FuseOSError(EAGAIN)
 
             dir = self._get_dir(d, True)
@@ -304,7 +304,7 @@ class AzureFS(LoggingMixIn, Operations):
             if _dir and f in _dir['files']:
                 del _dir['files'][f]
             return 0
-        except WindowsAzureMissingResourceError:
+        except AzureMissingResourceHttpError:
             raise FuseOSError(ENOENT)
         except Exception as e:
             raise FuseOSError(EAGAIN)
