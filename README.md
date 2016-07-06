@@ -1,9 +1,15 @@
 AzureFS
 =======
 
-A FUSE wrapper for **Windows Azure Blob Storage**. It provides basic
+A FUSE wrapper for **Azure Blob Storage**. It provides basic
 functionality to mount Azure Blob Storage as a local filesystem to
 your computer.
+
+> :warning: **NOTE:** This project is quite old and should only be
+> used for simple use cases. It is _not_ recommended for production use.
+> Please check out [Azure File Service](https://azure.microsoft.com/services/storage/files/)
+> which provides you a SMB/CIFS share on the cloud as it may fit better
+> for your use case
 
 ### Introduction & Aim
 
